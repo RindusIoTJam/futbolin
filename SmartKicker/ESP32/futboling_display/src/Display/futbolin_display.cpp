@@ -1,85 +1,240 @@
 #include "../include/Display/futbolin_display.hpp"
 
 
-futbolin_display::futbolin_display(/* args */)
+futbolin_display::futbolin_display(bool async)
 {
-    static GxEPD2_3C<GxEPD2_750c, GxEPD2_750c::HEIGHT> display_init(GxEPD2_750c(/*CS=*/ 15, /*DC=*/ 27, /*RST=*/ 26, /*BUSY=*/ 25));
-    this->display = &display_init;
-    display->init(115200);
-    SPI.end();
-    SPI.begin(13, 12, 14, 15);
-    SPIFFS.begin();
+  _async = async;
 
-    std::string last_green_player_up = "";
-    std::string last_green_player_down = "";
-    std::string last_blue_player_up = "";
-    std::string last_blue_player_down = "";
+  static GxEPD2_3C<GxEPD2_750c, GxEPD2_750c::HEIGHT> display_init(GxEPD2_750c(/*CS=*/ 15, /*DC=*/ 27, /*RST=*/ 26, /*BUSY=*/ 25));
+  this->display = &display_init;
+  display->init(115200);
+  SPI.end();
+  SPI.begin(13, 12, 14, 15);
+  SPIFFS.begin();
 
-    last_green_score = 0;
-    last_blue_score = 0;
+  last_blue_team.player_down[0] = '\0';
+  last_blue_team.player_up[0] = '\0';
+  last_green_team.player_down[0] = '\0';
+  last_green_team.player_up[0] = '\0';
+
+  last_green_score = 0;
+  last_blue_score = 0;
+
+  if (async)
+  {
+    xblue_score_Queue = xQueueCreate( 5, sizeof( int ) );
+    xgreen_score_Queue = xQueueCreate( 5, sizeof( int ) );
+
+    xblue_team_Queue = xQueueCreate( 10, sizeof( futbolin_display::futbolin_team_t ));
+    xgreen_team_Queue = xQueueCreate( 10, sizeof( futbolin_display::futbolin_team_t ));
+
+    xdisplay_mutex = xSemaphoreCreateMutex();
+    xdisplay_scoreboard_semaphore = xSemaphoreCreateBinary();
+    xSemaphoreTake(xdisplay_scoreboard_semaphore,0);
+
+    xReturnedgreen_score = xTaskCreate(
+                    this->update_green_score_async,       /* Function that implements the task. */
+                    "green_score",   /* Text name for the task. */
+                    CONFIG_FREERTOS_IDLE_TASK_STACKSIZE*2,      /* Stack size in words, not bytes. */
+                    this,    /* Parameter passed into the task. */
+                    tskIDLE_PRIORITY+1,/* Priority at which the task is created. */
+                    &xTask_green_score ); 
+
+    xReturnedblue_score = xTaskCreate(
+                    this->update_blue_score_async,       /* Function that implements the task. */
+                    "blue_score",   /* Text name for the task. */
+                    CONFIG_FREERTOS_IDLE_TASK_STACKSIZE*2,      /* Stack size in words, not bytes. */
+                    this,    /* Parameter passed into the task. */
+                    tskIDLE_PRIORITY+1,/* Priority at which the task is created. */
+                    &xTask_blue_score ); 
+
+    xReturnedScoreboard = xTaskCreate(
+                  this->display_scoreboard_async,       /* Function that implements the task. */
+                  "score_board",   /* Text name for the task. */
+                  CONFIG_FREERTOS_IDLE_TASK_STACKSIZE*2,      /* Stack size in words, not bytes. */
+                  this,    /* Parameter passed into the task. */
+                  tskIDLE_PRIORITY+1,/* Priority at which the task is created. */
+                  &xTask_scoreboard ); 
+
+    xReturnedScoreboard = xTaskCreate(
+                  this->update_green_team_async,       /* Function that implements the task. */
+                  "green_team",   /* Text name for the task. */
+                  CONFIG_FREERTOS_IDLE_TASK_STACKSIZE*2,      /* Stack size in words, not bytes. */
+                  this,    /* Parameter passed into the task. */
+                  tskIDLE_PRIORITY+1,/* Priority at which the task is created. */
+                  &xTask_green_team ); 
+
+    xReturnedScoreboard = xTaskCreate(
+              this->update_blue_team_async,       /* Function that implements the task. */
+              "blue_team",   /* Text name for the task. */
+              CONFIG_FREERTOS_IDLE_TASK_STACKSIZE*2,      /* Stack size in words, not bytes. */
+              this,    /* Parameter passed into the task. */
+              tskIDLE_PRIORITY+1,/* Priority at which the task is created. */
+              &xTask_blue_team );                
+
+  }
+  
+
+
 }
+
 
 futbolin_display::~futbolin_display()
 {
     delete this->display;
 }
 
+void futbolin_display::set_scoreboard(void)
+{
+  if(_async)
+  {
+    xSemaphoreGive(xdisplay_scoreboard_semaphore);
+  }
+  else
+  {
+    this->display_scoreboard();
+  }
+  
+}
+
+void futbolin_display::display_scoreboard_async(void* _this)
+{
+  futbolin_display *ithis = reinterpret_cast<futbolin_display*> (_this);
+  for(;;)
+  {
+    while(xSemaphoreTake(ithis->xdisplay_scoreboard_semaphore,portMAX_DELAY) != 1){}
+    xSemaphoreTake(ithis->xdisplay_mutex,portMAX_DELAY);
+    ithis->display_scoreboard();
+    xSemaphoreGive(ithis->xdisplay_mutex);
+  }
+}
 
 void futbolin_display::display_scoreboard(void)
 {
-    int16_t w2 = (display->width() - 640) / 2;
-    int16_t h2 = (display->height() - 384) / 2;
-    this->drawBitmapFromSpiffs_Buffered("VS1.bmp", w2, h2,true,true,false);
+  int16_t w2 = (display->width() - 640) / 2;
+  int16_t h2 = (display->height() - 384) / 2;
+  this->drawBitmapFromSpiffs_Buffered("VS1.bmp", w2, h2,true,true,false);
 }
 
-void futbolin_display::update_blue_players(std::string player_up,std::string player_down)
+void futbolin_display::set_blue_team(futbolin_display::futbolin_team_t player)
+{
+  if(_async)
+  {
+    xQueueSend(xblue_team_Queue,&player,0);
+  }
+  else
+  {
+    this->update_blue_players(player);
+  }
+}
+
+void futbolin_display::update_blue_team_async(void * _this)
+{
+  futbolin_display::futbolin_team_t blue_team;
+  futbolin_display *ithis = reinterpret_cast<futbolin_display*> (_this);
+  for(;;)
+  {
+    while(xQueueReceive(ithis->xblue_team_Queue,&blue_team,portMAX_DELAY) !=1){}
+    xSemaphoreTake(ithis->xdisplay_mutex,portMAX_DELAY);
+    ithis->update_blue_players(blue_team);
+    xSemaphoreGive(ithis->xdisplay_mutex);
+  }
+}
+
+void futbolin_display::update_blue_players(futbolin_display::futbolin_team_t player)
+{
+  display->setTextColor(GxEPD_YELLOW);
+  display->setTextSize(2);
+  display->setCursor(67,170);
+  display->print(last_green_team.player_up);
+  display->setCursor(67,200);
+  display->print(last_green_team.player_down);
+  display->setTextColor(GxEPD_WHITE);
+  display->setTextSize(2);
+  display->setCursor(67,170);
+  display->print(player.player_up);
+  display->setCursor(67,200);
+  display->print(player.player_down);
+
+  last_green_team = player;
+  
+
+  display->display(true);
+}
+
+void futbolin_display::set_green_team(futbolin_display::futbolin_team_t player)
+{
+  if(_async)
+  {
+    xQueueSend(xgreen_team_Queue,&player,0);
+  }
+  else
+  {
+    this->update_green_players(player);
+  }
+}
+
+void futbolin_display::update_green_team_async(void * _this)
+{
+  futbolin_display::futbolin_team_t green_team;
+  futbolin_display *ithis = reinterpret_cast<futbolin_display*> (_this);
+  for(;;)
+  {
+    while(xQueueReceive(ithis->xgreen_team_Queue,&green_team,portMAX_DELAY) !=1){}
+    xSemaphoreTake(ithis->xdisplay_mutex,portMAX_DELAY);
+    ithis->update_green_players(green_team);
+    xSemaphoreGive(ithis->xdisplay_mutex);
+  }
+}
+
+void futbolin_display::update_green_players(futbolin_display::futbolin_team_t player)
 {
     
 
-    display->setTextColor(GxEPD_BLACK);
+    display->setTextColor(GxEPD_YELLOW);
     display->setTextSize(2);
-    display->setCursor(67,170);
-    display->print(last_green_player_up.c_str());
-    display->setCursor(67,200);
-    display->print(last_green_player_down.c_str());
+    display->setCursor(460,170);
+    display->print(last_blue_team.player_up);
+    display->setCursor(460,200);
+    display->print(last_blue_team.player_down);
     display->setTextColor(GxEPD_WHITE);
     display->setTextSize(2);
-    display->setCursor(67,170);
-    display->print(player_up.c_str());
-    display->setCursor(67,200);
-    display->print(player_down.c_str());
+    display->setCursor(460,170);
+    display->print(player.player_up);
+    display->setCursor(460,200);
+    display->print(player.player_down);
 
-    last_green_player_up    =   player_up;
-    last_green_player_down  =   player_down;
+    last_blue_team    =   player;
 
     display->display(true);
 
 
 }
 
-void futbolin_display::update_green_players(std::string player_up,std::string player_down)
+void futbolin_display::set_blue_score(int score)
 {
-    
+  if(_async)
+  {
+    xQueueSend(xblue_score_Queue,&score,0);
+  }
+  else
+  {
+    this->update_blue_score(score);
+  }
+  
+}
 
-    display->setTextColor(GxEPD_BLACK);
-    display->setTextSize(2);
-    display->setCursor(460,170);
-    display->print(last_blue_player_up.c_str());
-    display->setCursor(460,200);
-    display->print(last_blue_player_down.c_str());
-    display->setTextColor(GxEPD_WHITE);
-    display->setTextSize(2);
-    display->setCursor(460,170);
-    display->print(player_up.c_str());
-    display->setCursor(460,200);
-    display->print(player_down.c_str());
-
-    last_blue_player_up    =   player_up;
-    last_blue_player_down  =   player_down;
-
-    display->display(true);
-
-
+void futbolin_display::update_blue_score_async(void* _this)
+{
+  int blue_score;
+  futbolin_display *ithis = reinterpret_cast<futbolin_display*> (_this);
+  for(;;)
+  {
+    while(xQueueReceive(ithis->xblue_score_Queue,&blue_score,portMAX_DELAY) !=1){}
+    xSemaphoreTake(ithis->xdisplay_mutex,portMAX_DELAY);
+    ithis->update_blue_score(blue_score);
+    xSemaphoreGive(ithis->xdisplay_mutex);
+  }
 }
 
 void futbolin_display::update_blue_score(int score)
@@ -90,6 +245,33 @@ void futbolin_display::update_blue_score(int score)
     display->printf("%d",score);
 
     display->display(true);
+}
+
+void futbolin_display::set_green_score(int score)
+{
+  if(_async)
+  {
+    xQueueSend(xgreen_score_Queue,&score,0);
+  }
+  else
+  {
+    this->update_green_score(score);
+  }
+  
+}
+
+void futbolin_display::update_green_score_async(void* _this)
+{
+  int green_score;
+  futbolin_display *ithis = reinterpret_cast<futbolin_display*> (_this);
+  for(;;)
+  {
+    while(xQueueReceive(ithis->xgreen_score_Queue,&green_score,portMAX_DELAY) !=1){}
+    xSemaphoreTake(ithis->xdisplay_mutex,portMAX_DELAY);
+    ithis->update_green_score(green_score);
+    xSemaphoreGive(ithis->xdisplay_mutex);
+
+  }
 }
 
 void futbolin_display::update_green_score(int score)
