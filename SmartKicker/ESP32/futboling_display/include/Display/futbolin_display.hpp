@@ -16,8 +16,8 @@ class futbolin_display
 public:
     typedef struct
 {
-    char player_up[100];
-    char player_down[100];
+    char player_up[20];
+    char player_down[20];
 } futbolin_team_t;
 private:
     /* data */

@@ -25,8 +25,8 @@ futbolin_display::futbolin_display(bool async)
     xblue_score_Queue = xQueueCreate( 5, sizeof( int ) );
     xgreen_score_Queue = xQueueCreate( 5, sizeof( int ) );
 
-    xblue_team_Queue = xQueueCreate( 10, sizeof( futbolin_display::futbolin_team_t ));
-    xgreen_team_Queue = xQueueCreate( 10, sizeof( futbolin_display::futbolin_team_t ));
+    xblue_team_Queue = xQueueCreate( 2, sizeof( futbolin_display::futbolin_team_t ));
+    xgreen_team_Queue = xQueueCreate( 2, sizeof( futbolin_display::futbolin_team_t ));
 
     xdisplay_mutex = xSemaphoreCreateMutex();
     xdisplay_scoreboard_semaphore = xSemaphoreCreateBinary();
@@ -56,7 +56,7 @@ futbolin_display::futbolin_display(bool async)
                   tskIDLE_PRIORITY+1,/* Priority at which the task is created. */
                   &xTask_scoreboard ); 
 
-    xReturnedScoreboard = xTaskCreate(
+    xReturnedgreen_team = xTaskCreate(
                   this->update_green_team_async,       /* Function that implements the task. */
                   "green_team",   /* Text name for the task. */
                   CONFIG_FREERTOS_IDLE_TASK_STACKSIZE*2,      /* Stack size in words, not bytes. */
@@ -64,7 +64,7 @@ futbolin_display::futbolin_display(bool async)
                   tskIDLE_PRIORITY+1,/* Priority at which the task is created. */
                   &xTask_green_team ); 
 
-    xReturnedScoreboard = xTaskCreate(
+    xReturnedblue_team = xTaskCreate(
               this->update_blue_team_async,       /* Function that implements the task. */
               "blue_team",   /* Text name for the task. */
               CONFIG_FREERTOS_IDLE_TASK_STACKSIZE*2,      /* Stack size in words, not bytes. */
