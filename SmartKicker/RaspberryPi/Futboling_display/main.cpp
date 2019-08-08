@@ -33,6 +33,7 @@ int main(int argc, char *argv[])
     position BlueTeamPosition;
     position ScoreGreenPosition;
     position ScoreBluePosition;
+    position waitingPlayersPosition;
 
     configurationFile->beginGroup("GreenTeamTitle");
     GreenPosition.pX1 = configurationFile->value("X1").toInt();
@@ -76,12 +77,19 @@ int main(int argc, char *argv[])
     ScoreBluePosition.pY2 = configurationFile->value("Y2").toInt();
     ScoreGreenPosition.show = configurationFile->value("Show").toBool();
     configurationFile->endGroup();
+    configurationFile->beginGroup("PlayersQueue");
+    waitingPlayersPosition.pX1 = configurationFile->value("X1").toInt();
+    waitingPlayersPosition.pX2 = configurationFile->value("X2").toInt();
+    waitingPlayersPosition.pY1 = configurationFile->value("Y1").toInt();
+    waitingPlayersPosition.pY2 = configurationFile->value("Y2").toInt();
+    waitingPlayersPosition.show = configurationFile->value("Show").toBool();
+    configurationFile->endGroup();
 
     configurationFile->~QSettings();
     wallpaperPathInfo.~QFileInfo();
     fontPathInfo.~QFileInfo();
 
-    scoreboard w(wallpaperPath,fontPath,GreenPosition,BluePosition,GreenTeamPosition,BlueTeamPosition,ScoreGreenPosition,ScoreBluePosition);
+    scoreboard w(wallpaperPath,fontPath,GreenPosition,BluePosition,GreenTeamPosition,BlueTeamPosition,ScoreGreenPosition,ScoreBluePosition,waitingPlayersPosition);
     w.show();
 
     return a.exec();

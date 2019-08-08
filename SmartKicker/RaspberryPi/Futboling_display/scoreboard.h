@@ -5,6 +5,8 @@
 #include <QtMqtt/QtMqtt>
 #include <QDebug>
 #include "./DinamicFontSize/dynamicfontsizelabel.h"
+#include <QTableView>
+#include <QStandardItemModel>
 
 
 struct position
@@ -42,7 +44,7 @@ class scoreboard : public QMainWindow
 
 public:
     explicit scoreboard(QWidget *parent = nullptr);
-    scoreboard(QString &wallpaperPath,QString &fontPath,position &GreenPosition, position &BluePosition, position &GreenTeamPosition,position &BlueTeamPosition,position &ScoreGreenPosition,position &ScoreBluePosition,QWidget *parent = nullptr);
+    scoreboard(QString &wallpaperPath,QString &fontPath,position &GreenPosition, position &BluePosition, position &GreenTeamPosition,position &BlueTeamPosition,position &ScoreGreenPosition,position &ScoreBluePosition,position &waitingPlayersPosition,QWidget *parent = nullptr);
     ~scoreboard();
 
 private:
@@ -84,6 +86,7 @@ private:
     const position ScoreGreenPosition;
     const position ScoreBluePosition;
     const position TimePosition;
+    const position waitingPlayersPosition;
 
     DynamicFontSizeLabel greenTeam;
     DynamicFontSizeLabel blueTeam;
@@ -92,6 +95,9 @@ private:
     DynamicFontSizeLabel scoreGreenLabel;
     DynamicFontSizeLabel scoreBlueLabel;
     DynamicFontSizeLabel timeLabel;
+    QStandardItemModel tablemodel;
+    QTableView waitingPlayers;
+
 
     QVector<Team> teamsList;
     score scoreCounter;
@@ -103,11 +109,13 @@ private:
     void parseMQTTtoList(const QByteArray &msg);
     void parseMQTTEvent(const QByteArray &msg);
 
+    void updateWaitingPlayers();
 
 public slots:
     void onConnectionStatus(QMqttClient::ClientState state);
     void onReceived(const QByteArray &message, const QMqttTopicName &topic);
     void displayPlayers(void);
+
 
 signals:
     void newPlayerReceived(void);

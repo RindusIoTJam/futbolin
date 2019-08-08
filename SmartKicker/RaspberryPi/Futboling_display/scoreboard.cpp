@@ -2,9 +2,9 @@
 #include "ui_scoreboard.h"
 #include <QImageReader>
 #include <QFontDatabase>
+#include <QHeaderView>
 
-
-scoreboard::scoreboard(QString &wallpaperPath,QString &fontPath,position &GreenPosition, position &BluePosition, position &GreenTeamPosition,position &BlueTeamPosition,position &ScoreGreenPosition,position &ScoreBluePosition, QWidget *parent) :
+scoreboard::scoreboard(QString &wallpaperPath,QString &fontPath,position &GreenPosition, position &BluePosition, position &GreenTeamPosition,position &BlueTeamPosition,position &ScoreGreenPosition,position &ScoreBluePosition, position &waitingPlayersPosition,QWidget *parent) :
     QMainWindow(parent),
     ui(new Ui::scoreboard),
     futbolinPlayersTopic("rindus/futbolin"),
@@ -19,12 +19,15 @@ scoreboard::scoreboard(QString &wallpaperPath,QString &fontPath,position &GreenP
     ScoreGreenPosition(ScoreGreenPosition),
     ScoreBluePosition(ScoreBluePosition),
     TimePosition(294, 331, 190, 190),
+    waitingPlayersPosition(waitingPlayersPosition),
     greenTeam(this),
     blueTeam(this),
     greenTeamLabel(this),
     blueTeamLabel(this),
     scoreGreenLabel(this),
     scoreBlueLabel(this),
+    tablemodel(),
+    waitingPlayers(this),
     teamsList(),
     scoreCounter(),
     lastEvent('c')
@@ -48,12 +51,16 @@ scoreboard::scoreboard(QString &wallpaperPath,QString &fontPath,position &GreenP
     blueTeamLabel.setGeometry(BlueTeamPosition.pX1,BlueTeamPosition.pY1,BlueTeamPosition.pX2 - BlueTeamPosition.pX1,BlueTeamPosition.pY2 - BlueTeamPosition.pY1);
     scoreGreenLabel.setGeometry(ScoreGreenPosition.pX1,ScoreGreenPosition.pY1,ScoreGreenPosition.pX2 - ScoreGreenPosition.pX1,ScoreGreenPosition.pY2 - ScoreGreenPosition.pY1);
     scoreBlueLabel.setGeometry(ScoreBluePosition.pX1,ScoreBluePosition.pY1,ScoreBluePosition.pX2 - ScoreBluePosition.pX1,ScoreBluePosition.pY2 - ScoreBluePosition.pY1);
+    waitingPlayers.setGeometry(waitingPlayersPosition.pX1,waitingPlayersPosition.pY1,waitingPlayersPosition.pX2 - waitingPlayersPosition.pX1,waitingPlayersPosition.pY2 - waitingPlayersPosition.pY1);
 
     int fontid = QFontDatabase::addApplicationFont(fontPath);
 
     QStringList fontlist = QFontDatabase::applicationFontFamilies(fontid);
 
     QFont font(fontlist.front());
+
+
+
 
     ui->setupUi(this);
 
@@ -102,6 +109,16 @@ scoreboard::scoreboard(QString &wallpaperPath,QString &fontPath,position &GreenP
     scoreBlueLabel.setText("0");
     scoreBlueLabel.setAlignment(Qt::AlignCenter);
     scoreBlueLabel.show();
+
+    waitingPlayers.setModel(&tablemodel);
+    waitingPlayers.setStyleSheet("background-color: transparent");
+    waitingPlayers.setFont(font);
+    waitingPlayers.setPalette(QPalette(QPalette::Background, Qt::transparent));
+    waitingPlayers.setAttribute(Qt::WA_TranslucentBackground,true);
+    waitingPlayers.verticalHeader()->setStyleSheet("color: white");
+    waitingPlayers.horizontalHeader()->hide();
+    waitingPlayers.setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    waitingPlayers.show();
 
     m_client->connectToHostEncrypted();
 
@@ -209,7 +226,7 @@ void scoreboard::resizeLabels(QSize Size)
  blueTeamLabel.setGeometry(BlueTeamPosition.pX1*scaleW,BlueTeamPosition.pY1*scaleH,(BlueTeamPosition.pX2 - BlueTeamPosition.pX1)*scaleW,(BlueTeamPosition.pY2 - BlueTeamPosition.pY1)*scaleH);
  scoreGreenLabel.setGeometry(ScoreGreenPosition.pX1*scaleW,ScoreGreenPosition.pY1*scaleH,(ScoreGreenPosition.pX2 - ScoreGreenPosition.pX1)*scaleW,(ScoreGreenPosition.pY2 - ScoreGreenPosition.pY1)*scaleH);
  scoreBlueLabel.setGeometry(ScoreBluePosition.pX1*scaleW,ScoreBluePosition.pY1*scaleH,(ScoreBluePosition.pX2 - ScoreBluePosition.pX1)*scaleW,(ScoreBluePosition.pY2 - ScoreBluePosition.pY1)*scaleH);
-
+ waitingPlayers.setGeometry(waitingPlayersPosition.pX1*scaleW,waitingPlayersPosition.pY1*scaleH,(waitingPlayersPosition.pX2 - waitingPlayersPosition.pX1)*scaleW,(waitingPlayersPosition.pY2 - waitingPlayersPosition.pY1)*scaleH);
 }
 
 void scoreboard::parseMQTTtoList(const QByteArray &msg)
@@ -226,34 +243,25 @@ void scoreboard::parseMQTTtoList(const QByteArray &msg)
     team.playerDown = name2;
 
     teamsList.append(team);
-
+    updateWaitingPlayers();
     emit newPlayerReceived();
 }
 
 void scoreboard::displayPlayers(void)
 {
-    static bool firsTime = true;
-
-    if(firsTime)
+    if(teamsList.size() < 2 )
     {
-        if(teamsList.size() < 2 )
-        {
-           statusBar()->showMessage(tr("Waiting for other team"), 2000);
-        }
-        else
-        {
-         firsTime = false;
+         statusBar()->showMessage(tr("Waiting for other team"), 60000);
+    }
+    else
+    {
+         statusBar()->clearMessage();
          Team team = teamsList.takeFirst();
          greenTeamLabel.setText(team.playerUp + "\n" + team.playerDown);
          team = teamsList.takeFirst();
          blueTeamLabel.setText(team.playerUp + "\n" + team.playerDown);
-
+         updateWaitingPlayers();
          disconnect(this, &scoreboard::newPlayerReceived, this, &scoreboard::displayPlayers);
-        }
-    }
-    else
-    {
-
     }
 }
 
@@ -271,15 +279,28 @@ void scoreboard::parseMQTTEvent(const QByteArray &msg)
     {
         if (!teamsList.isEmpty())
         {
-            Team team = teamsList.takeFirst();
+
             if (scoreCounter.blue < scoreCounter.green)
             {
+                Team team = teamsList.takeFirst();
+                QStringList lastPlayers = blueTeamLabel.text().split('\n');
                 blueTeamLabel.setText(team.playerUp + "\n" + team.playerDown);
+                team.playerUp = lastPlayers.front();
+                team.playerDown = lastPlayers.back();
+                teamsList.push_back(team);
+                updateWaitingPlayers();
             }
-            else
+            else if (scoreCounter.blue > scoreCounter.green)
             {
+                Team team = teamsList.takeFirst();
+                QStringList lastPlayers = greenTeamLabel.text().split('\n');
                 greenTeamLabel.setText(team.playerUp + "\n" + team.playerDown);
+                team.playerUp = lastPlayers.front();
+                team.playerDown = lastPlayers.back();
+                teamsList.push_back(team);
+                updateWaitingPlayers();
             }
+
         }
 
         scoreCounter = score();
@@ -295,6 +316,34 @@ void scoreboard::parseMQTTEvent(const QByteArray &msg)
             scoreCounter.green--;
         }
     }
+    else if ((msg.front() == 'd'))
+    {
+        QByteArray msgindex = msg;
+        msgindex.remove(0,1);
+        bool ok;
+        int index = msgindex.toInt(&ok);
+        if(ok)
+        {
+            if(index <= teamsList.size() && index !=0)
+            {
+                teamsList.remove(--index);
+                updateWaitingPlayers();
+            }
+        }
+        else
+        {
+            if(msg.front() == 'd')
+            {
+                teamsList.clear();
+                blueTeamLabel.clear();
+                greenTeamLabel.clear();
+                scoreCounter = score();
+                connect(this, &scoreboard::newPlayerReceived, this, &scoreboard::displayPlayers);
+                updateWaitingPlayers();
+            }
+        }
+    }
+
 
     lastEvent = msg.front();
     scoreBlueLabel.setText(QString::number(scoreCounter.blue));
@@ -303,3 +352,18 @@ void scoreboard::parseMQTTEvent(const QByteArray &msg)
     qDebug() << "Green team counter " << scoreCounter.green;
 }
 
+void scoreboard::updateWaitingPlayers()
+{
+    tablemodel.clear();
+    for (int i = 0;i < teamsList.size(); i++)
+    {
+        Team team = teamsList.at(i);
+        QStandardItem *NameA = new QStandardItem(team.playerUp + "\n" + team.playerDown);
+        NameA->setTextAlignment(Qt::AlignVCenter | Qt::AlignJustify);
+        tablemodel.setItem(i,0,NameA);
+    }
+    waitingPlayers.setModel(&tablemodel);
+    waitingPlayers.resizeRowsToContents();
+    waitingPlayers.resizeColumnsToContents();
+    waitingPlayers.update();
+}
