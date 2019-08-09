@@ -13,10 +13,13 @@ void reset_button_interrupt();
 const char left = 'l';
 const char right = 'r';
 const char clear = 'c';
+const char undo = 'n';
 const unsigned long SECUREPRESSTIME = 20;
+const unsigned long LONGPRESSTIME = 800;
+volatile bool longpressure = false;
 volatile char packet = 'c';
 volatile int reset_counter = 0;
-volatile bool flagReadyForExternalInterrupt = false;
+volatile bool flagReadyForExternalInterrupt = true;
 enum state_machine {INTERRUPT, SEND_PACKET, RESET_PRESS, GO_TO_SLEEP};
 volatile state_machine state = GO_TO_SLEEP;
 // the setup function runs once when you press reset or power the board
@@ -42,22 +45,21 @@ void loop()
 {
   switch (state)
   {
-    case INTERRUPT:
-      switchToPLLwithHSE(RCC_PLLMUL_9); //recover normal clock speed
-    //detachInterrupt(digitalPinToInterrupt(right_goal));
-          //detachInterrupt(digitalPinToInterrupt(left_goal));
-    //detachInterrupt(digitalPinToInterrupt(reset_button));
-          
+  case INTERRUPT:
+    switchToPLLwithHSE(RCC_PLLMUL_9); //recover normal clock speed
     if (checkInterrupt(packet))
     {
-    state = SEND_PACKET;
+      state = SEND_PACKET;
+    }else
+    {
+      state = GO_TO_SLEEP;
     }
-    break;
-    case SEND_PACKET:
-      while (!LoRa.begin(433E6));  //transmit lora error using led
-      LoRa.beginPacket();  
-      switch (packet)
-      {
+  break;
+  case SEND_PACKET:
+    while (!LoRa.begin(433E6));  //transmit lora error using led
+    LoRa.beginPacket();  
+    switch (packet)
+    {
     case 'l':
       LoRa.print(left);
     break;
@@ -65,7 +67,15 @@ void loop()
       LoRa.print(right);
     break;
         case 'c':
-      LoRa.print(clear);
+      if(longpressure)
+      {
+        longpressure = false;
+        LoRa.print(undo);
+      }
+      else
+      {
+        LoRa.print(clear);
+      }
     break;
       }
       LoRa.endPacket();
@@ -85,25 +95,30 @@ void loop()
 }    
 void right_goal_interrupt() 
 {
-  flagReadyForExternalInterrupt = false;
-  state = INTERRUPT;    //state r right goal
-  packet = 'r';
-
+  if (flagReadyForExternalInterrupt)
+  {
+    flagReadyForExternalInterrupt = false;  
+    state = INTERRUPT;    //state r right goal
+    packet = 'r';
+  }
 }
 void left_goal_interrupt()
 {
-  flagReadyForExternalInterrupt = false;
-  state = INTERRUPT;    //state l left goal
-  packet = 'l';
-
+  if (flagReadyForExternalInterrupt)
+  {
+    flagReadyForExternalInterrupt = false;  
+    state = INTERRUPT;    //state l left goal
+    packet = 'l';
+  }
 }
 void reset_button_interrupt()
 {
-
-  flagReadyForExternalInterrupt = false;  
-  state = INTERRUPT;    //state c clear
-  packet = 'c';
-
+  if (flagReadyForExternalInterrupt)
+  {
+    flagReadyForExternalInterrupt = false;  
+    state = INTERRUPT;    //state c clear
+    packet = 'c';
+  }
 }
 void goToSleep()
 {
@@ -117,15 +132,20 @@ bool checkInterrupt(char packet)
   {
     case 'l':
       while(digitalRead(left_goal) == 0);
-      break;
-        case 'r':
-        while(digitalRead(right_goal) == 0);
-       break;
-        case 'c':
-        while(digitalRead(reset_button) == 0);
-       break;
-    }
+    break;
+    case 'r':
+      while(digitalRead(right_goal) == 0);
+    break;
+    case 'c':
+      while(digitalRead(reset_button) == 0);
+    break;
+  }
   nowmillis = millis();
+  
+  if(nowmillis - previousmillis > LONGPRESSTIME)
+  {
+    longpressure = true;
+  }
   
   return (nowmillis - previousmillis > SECUREPRESSTIME);
 }
